@@ -1403,17 +1403,20 @@ function LegalPage({ title, children }) {
         }}
       >
         <a
-          href="#/"
+          href="#"
           onClick={(e) => {
-            // hashchange doesn't fire when only removing the hash, so we
-            // explicitly push and dispatch.
+            // Setting hash to empty string reliably fires hashchange in all
+            // browsers, unlike pushState alone (which fires popstate that
+            // we're not listening for). Using href="#" as the fallback for
+            // users who Cmd+click or have JS disabled.
             e.preventDefault();
-            window.history.pushState(
-              null,
-              '',
-              window.location.pathname + window.location.search
-            );
-            window.dispatchEvent(new HashChangeEvent('hashchange'));
+            // If already at #/ or empty, just scroll to top
+            if (window.location.hash === '' || window.location.hash === '#' || window.location.hash === '#/') {
+              window.scrollTo({ top: 0 });
+              return;
+            }
+            // Replace hash with empty — fires hashchange, our listener picks it up
+            window.location.hash = '';
           }}
           style={{
             display: 'inline-flex',
@@ -1743,7 +1746,33 @@ function TermsPage() {
   );
 }
 
+/* The wrapper component handles routing. It owns the hash-watching state
+   and decides which top-level page to render. The actual detector UI lives
+   in DetectorApp below — by extracting routing OUT of that component, we
+   avoid React's "Rules of Hooks" violation that occurs when conditional
+   early returns sit alongside other hooks. */
 export default function App() {
+  const [route, setRoute] = useState(() =>
+    typeof window !== 'undefined' ? window.location.hash : ''
+  );
+  useEffect(() => {
+    const onHashChange = () => {
+      setRoute(window.location.hash);
+      // Scroll to top on every route change. Without this, navigating from
+      // the main page footer (scrolled to bottom) to a legal page leaves
+      // the user looking at empty space and assuming the page is broken.
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  if (route === '#/privacy') return <PrivacyPage />;
+  if (route === '#/terms') return <TermsPage />;
+  return <DetectorApp />;
+}
+
+function DetectorApp() {
   const pdfReady = usePdfJs();
   const [text, setText] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -1755,23 +1784,6 @@ export default function App() {
   const [shareCopied, setShareCopied] = useState(false);
   const fileRef = useRef(null);
   const resultsRef = useRef(null);
-
-  // Hash-based routing: '/privacy' and '/terms' render dedicated pages.
-  // Everything else renders the main detector. We use hash routing because
-  // it requires no build config — works whether deployed to a static host,
-  // a CDN, or behind any framework. The trade-off vs. real routes is that
-  // the URL has a # in it, which is fine for legal pages users rarely
-  // hit but ad networks need to be able to crawl.
-  const [route, setRoute] = useState(() =>
-    typeof window !== 'undefined' ? window.location.hash : ''
-  );
-  useEffect(() => {
-    const onHashChange = () => setRoute(window.location.hash);
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
-  if (route === '#/privacy') return <PrivacyPage />;
-  if (route === '#/terms') return <TermsPage />;
 
   const currency = useMemo(() => {
     if (!text) return '$';
